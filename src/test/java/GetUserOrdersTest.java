@@ -1,10 +1,12 @@
 import client.StellarBurgersClient;
+import io.qameta.allure.Description;
 import io.qameta.allure.Step;
 import io.restassured.response.Response;
+import model.User;
 import org.junit.Before;
 import org.junit.Test;
+import io.qameta.allure.junit4.DisplayName;
 
-import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
 public class GetUserOrdersTest {
@@ -16,21 +18,20 @@ public class GetUserOrdersTest {
     @Step("Авторизация пользователя и получение токена")
     public void setUp() {
         client = new StellarBurgersClient();
-        Response loginResponse = client.loginUser("moreordertest@yandex.ru", "password");
+
+        // Используем объект User для логина
+        User user = new User("moreordertest@yandex.ru", "password", null);
+        Response loginResponse = client.loginUser(user);
         loginResponse.then().statusCode(200);
-        token = loginResponse.jsonPath().getString("accessToken").replace("Bearer ", "");
+
+        token = loginResponse.jsonPath().getString("accessToken");
     }
 
     @Test
-    @Step("Получение заказов авторизованного пользователя")
+    @DisplayName("Получение заказов авторизованного пользователя")
+    @Description("Проверка успешного получения заказов")
     public void testGetUserOrdersWithAuthorization() {
-        Response response = given()
-                .baseUri("https://stellarburgers.nomoreparties.site/api")
-                .header("Authorization", "Bearer " + token)
-                .get("/orders");
-
-        response.prettyPrint();
-
+        Response response = client.getUserOrders(token);
         response.then().statusCode(200)
                 .body("success", equalTo(true))
                 .body("orders", notNullValue())
@@ -38,14 +39,10 @@ public class GetUserOrdersTest {
     }
 
     @Test
-    @Step("Получение заказов без авторизации")
+    @DisplayName("Получение заказов без авторизации")
+    @Description("Проверка ошибки при получении заказов без авторизации")
     public void testGetUserOrdersWithoutAuthorization() {
-        Response response = given()
-                .baseUri("https://stellarburgers.nomoreparties.site/api")
-                .get("/orders");
-
-        response.prettyPrint();
-
+        Response response = client.getUserOrders(null);
         response.then().statusCode(401)
                 .body("success", equalTo(false))
                 .body("message", equalTo("You should be authorised"));

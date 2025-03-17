@@ -1,12 +1,16 @@
 import client.StellarBurgersClient;
+import io.qameta.allure.Description;
 import io.qameta.allure.Step;
+import io.qameta.allure.junit4.DisplayName;
 import io.restassured.response.Response;
+import model.Order;
 import model.User;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import static io.restassured.RestAssured.given;
+import java.util.List;
+
 import static org.hamcrest.Matchers.*;
 
 public class OrderTest {
@@ -17,15 +21,18 @@ public class OrderTest {
     private String refreshToken;
 
     @Before
-    @Step("Настройка теста: создание пользователя и авторизация")
+    @Step("Создание пользователя и авторизация")
     public void setUp() {
         client = new StellarBurgersClient();
-        user = User.generateRandomUser();
-        Response response = client.createUser(user.getEmail(), user.getPassword(), user.getName());
+        user = User.generateRandomUser(); // Создаем объект пользователя
+
+        Response response = client.createUser(user); // Передаем объект User
         response.then().statusCode(200);
 
-        Response loginResponse = client.loginUser(user.getEmail(), user.getPassword());
-        token = formatToken(loginResponse.jsonPath().getString("accessToken"));
+        Response loginResponse = client.loginUser(user); // Логинимся тоже через объект User
+        loginResponse.then().statusCode(200);
+
+        token = loginResponse.jsonPath().getString("accessToken");
         refreshToken = loginResponse.jsonPath().getString("refreshToken");
     }
 
@@ -41,88 +48,81 @@ public class OrderTest {
     private void refreshAccessTokenIfNeeded() {
         Response refreshResponse = client.refreshAccessToken(refreshToken);
         if (refreshResponse.getStatusCode() == 200) {
-            token = formatToken(refreshResponse.jsonPath().getString("accessToken"));
+            token = refreshResponse.jsonPath().getString("accessToken");
         }
     }
-
-    @Step("Форматирование токена")
-    private String formatToken(String rawToken) {
-        if (rawToken == null || rawToken.isEmpty()) {
-            throw new IllegalArgumentException("Received an empty token!");
-        }
-        return rawToken.startsWith("Bearer ") ? rawToken : "Bearer " + rawToken;
-    }
-
     @Test
-    @Step("Создание заказа с авторизацией")
+    @DisplayName("Создание заказа с авторизацией")
+    @Description("Тест успешного создания заказа авторизованным пользователем")
     public void testCreateOrderWithAuthorization() {
         refreshAccessTokenIfNeeded();
-        String[] ingredients = {"61c0c5a71d1f82001bdaaa72", "609646e4dc916e00276b2870"};
-        Response response = client.createOrder(token, ingredients);
+        Response ingredientsResponse = client.getIngredients();
+        ingredientsResponse.then().statusCode(200);
+        List<String> ingredientIds = ingredientsResponse.jsonPath().getList("data._id");
+        if (ingredientIds.isEmpty()) {
+            throw new RuntimeException("Не удалось получить список ингредиентов");
+        }
+        Order order = new Order(new String[]{ingredientIds.get(0), ingredientIds.get(1)}); // Используем два первых ингредиента
+        Response response = client.createOrder(token, order);
         response.then().statusCode(200).body("success", equalTo(true));
     }
 
     @Test
-    @Step("Создание заказа без авторизации")
+    @DisplayName("Создание заказа без авторизации")
+    @Description("Тест успешного создания заказа без авторизации")
     public void testCreateOrderWithoutAuthorization() {
-        String ingredients = "[\"61c0c5a71d1f82001bdaaa72\", \"609646e4dc916e00276b2870\"]";
-        Response response = given()
-                .contentType("application/json")
-                .body("{\"ingredients\": " + ingredients + "}")
-                .when()
-                .post("https://stellarburgers.nomoreparties.site/api/orders");
-
-        response.then()
-                .body("success", notNullValue())
-                .body("name", notNullValue())
-                .body("order.number", notNullValue());
+        Response ingredientsResponse = client.getIngredients();
+        ingredientsResponse.then().statusCode(200);
+        List<String> ingredientIds = ingredientsResponse.jsonPath().getList("data._id");
+        if (ingredientIds.isEmpty()) {
+            throw new RuntimeException("Не удалось получить список ингредиентов");
+        }
+        Order order = new Order(new String[]{ingredientIds.get(0), ingredientIds.get(1)});
+        Response response = client.createOrder(null, order);
+        response.then().body("success", equalTo(true));
     }
 
     @Test
-    @Step("Создание заказа без ингредиентов")
+    @DisplayName("Создание заказа без ингредиентов")
+    @Description("Тест проверяет, что заказ без ингредиентов невозможен")
     public void testCreateOrderWithoutIngredients() {
         refreshAccessTokenIfNeeded();
-        Response response = given()
-                .baseUri("https://stellarburgers.nomoreparties.site/api")
-                .contentType("application/json")
-                .header("Authorization", token)
-                .body("{\"ingredients\": []}")
-                .when()
-                .post("/orders");
+        Order order = new Order(new String[]{});
 
-        response.then()
-                .statusCode(400)
+        Response response = client.createOrder(token, order);
+
+        response.then().statusCode(400)
                 .body("message", equalTo("Ingredient ids must be provided"));
     }
 
     @Test
-    @Step("Создание заказа с неверным хешем ингредиентов")
+    @DisplayName("Создание заказа с неверным хешем ингредиентов")
+    @Description("Тест проверяет, что заказ с неправильным хешем ингредиентов невозможен")
     public void testCreateOrderWithInvalidIngredientHash() {
         refreshAccessTokenIfNeeded();
-        Response response = client.createOrder(token, new String[]{"invalid_hash"});
+        Order order = new Order(new String[]{"invalid_hash"});
+
+        Response response = client.createOrder(token, order);
         response.then().statusCode(400)
                 .body("message", equalTo("One or more ids provided are incorrect"));
     }
 
     @Test
-    @Step("Получение заказов конкретного авторизованного пользователя")
+    @DisplayName("Получение заказов авторизованного пользователя")
+    @Description("Тест проверяет получение списка заказов авторизованным пользователем")
     public void testGetOrdersWithAuthorization() {
         refreshAccessTokenIfNeeded();
-        Response response = given()
-                .header("Authorization", token)
-                .get("https://stellarburgers.nomoreparties.site/api/orders");
-
+        Response response = client.getUserOrders(token);
         response.then().statusCode(200)
                 .body("success", equalTo(true))
                 .body("orders", notNullValue());
     }
 
     @Test
-    @Step("Получение заказов без авторизации")
+    @DisplayName("Получение заказов без авторизации")
+    @Description("Тест проверяет, что без авторизации получить заказы невозможно")
     public void testGetOrdersWithoutAuthorization() {
-        Response response = given()
-                .get("https://stellarburgers.nomoreparties.site/api/orders");
-
+        Response response = client.getUserOrders(null);
         response.then().statusCode(401)
                 .body("message", equalTo("You should be authorised"));
     }

@@ -1,5 +1,7 @@
 import client.StellarBurgersClient;
+import io.qameta.allure.Description;
 import io.qameta.allure.Step;
+import io.qameta.allure.junit4.DisplayName;
 import io.restassured.response.Response;
 import model.User;
 import org.junit.After;
@@ -7,6 +9,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.notNullValue;
 
 public class UserRegistrationTest {
     private StellarBurgersClient client;
@@ -14,11 +17,14 @@ public class UserRegistrationTest {
     private String token;
 
     @Before
+    @Step("Создание тестового клиента")
     public void setUp() {
         client = new StellarBurgersClient();
+        testUser = User.generateRandomUser();
     }
 
     @After
+    @Step("Удаление пользователя после теста, если был создан")
     public void tearDown() {
         if (token != null) {
             client.deleteUser(token);
@@ -26,34 +32,60 @@ public class UserRegistrationTest {
     }
 
     @Test
-    @Step("Создание уникального пользователя")
-    public void testCreateUniqueUser() {
-        testUser = User.generateRandomUser();
-        Response response = client.createUser(testUser.getEmail(), testUser.getPassword(), testUser.getName());
-        response.then().statusCode(200).body("success", equalTo(true));
-
+    @DisplayName("Регистрация нового пользователя")
+    @Description("Тест успешного создания нового пользователя")
+    public void testCreateNewUser() {
+        Response response = client.createUser(testUser); // Передаем объект User
+        response.then().statusCode(200)
+                .body("success", equalTo(true))
+                .body("accessToken", notNullValue());
         token = response.jsonPath().getString("accessToken");
     }
 
     @Test
-    @Step("Создание пользователя, который уже зарегистрирован")
+    @DisplayName("Регистрации уже существующего пользователя")
+    @Description("Тест попытки регистрации дублирующего пользователя")
     public void testCreateDuplicateUser() {
-        String email = "angrysuper@yandex.ru";
-        String password = "password";
-        String name = "Username";
+        Response response1 = client.createUser(testUser);
+        response1.then().statusCode(200);
 
-        client.createUser(email, password, name);
-        Response response = client.createUser(email, password, name);
+        Response response2 = client.createUser(testUser);
+        response2.then().statusCode(403)
+                .body("message", equalTo("User already exists"));
 
-        response.then().statusCode(403).body("message", equalTo("User already exists"));
+        token = response1.jsonPath().getString("accessToken");
     }
 
     @Test
-    @Step("Создание пользователя без email")
+    @DisplayName("Создание пользователя без email")
+    @Description("Тест на ошибку при регистрацию пользователя без email")
     public void testCreateUserWithoutEmail() {
-        Response response = client.createUser("", "password", "Username");
-        response.then().statusCode(403).body("message", equalTo("Email, password and name are required fields"));
+        User userWithoutEmail = new User(null, "password123", "TestUser");
+        Response response = client.createUser(userWithoutEmail);
+
+        response.then().statusCode(403)
+                .body("message", equalTo("Email, password and name are required fields"));
     }
 
+    @Test
+    @DisplayName("Создание пользователя без пароля")
+    @Description("Тест на ошибку регистрацию пользователя без пароля")
+    public void testCreateUserWithoutPassword() {
+        User userWithoutPassword = new User("testuser@example.com", null, "TestUser");
+        Response response = client.createUser(userWithoutPassword);
 
+        response.then().statusCode(403)
+                .body("message", equalTo("Email, password and name are required fields"));
+    }
+
+    @Test
+    @DisplayName("Создание пользователя без имени")
+    @Description("Тест на ошибку регистрацию пользователя без имени")
+    public void testCreateUserWithoutName() {
+        User userWithoutName = new User("testuser@example.com", "password123", null);
+        Response response = client.createUser(userWithoutName);
+
+        response.then().statusCode(403) // Исправлено с 400 на 403
+                .body("message", equalTo("Email, password and name are required fields"));
+    }
 }

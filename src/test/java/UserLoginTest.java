@@ -1,5 +1,7 @@
 import client.StellarBurgersClient;
+import io.qameta.allure.Description;
 import io.qameta.allure.Step;
+import io.qameta.allure.junit4.DisplayName;
 import io.restassured.response.Response;
 import model.User;
 import org.junit.After;
@@ -15,16 +17,19 @@ public class UserLoginTest {
     private String token;
 
     @Before
+    @Step("Создание тестового пользователя")
     public void setUp() {
         client = new StellarBurgersClient();
-        testUser = User.generateRandomUser();
-        Response response = client.createUser(testUser.getEmail(), testUser.getPassword(), testUser.getName());
-        token = response.jsonPath().getString("accessToken");
-        System.out.println("Generated Token: " + token); // <-- Логирование для отладки
+        testUser = User.generateRandomUser(); // Генерируем случайного пользователя
 
+        Response response = client.createUser(testUser); // Передаем объект User
+        response.then().statusCode(200);
+
+        token = response.jsonPath().getString("accessToken");
     }
 
     @After
+    @Step("Удаление тестового пользователя после выполнения тестов")
     public void tearDown() {
         if (token != null) {
             client.deleteUser(token);
@@ -32,17 +37,19 @@ public class UserLoginTest {
     }
 
     @Test
-    @Step("Логин под существующим пользователем")
+    @DisplayName("Логин под существующим пользователем")
+    @Description("Тест успешной авторизации пользователя")
     public void testLoginWithValidUser() {
-        Response response = client.loginUser(testUser.getEmail(), testUser.getPassword());
+        Response response = client.loginUser(testUser); // Логинимся через объект User
         response.then().statusCode(200).body("accessToken", notNullValue());
     }
 
     @Test
-    @Step("Логин с неверными данными")
+    @DisplayName("Логин с неверными учетными данными")
+    @Description("Тест авторизации с неправильными данными")
     public void testLoginWithInvalidCredentials() {
-        Response response = client.loginUser("wrong@mail.com", "wrongpassword");
+        User invalidUser = new User("wrong@mail.com", "wrongpassword", null); // Создаем некорректного пользователя
+        Response response = client.loginUser(invalidUser);
         response.then().statusCode(401).body("message", equalTo("email or password are incorrect"));
     }
-
 }

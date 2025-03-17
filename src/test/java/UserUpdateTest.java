@@ -1,4 +1,6 @@
+import io.qameta.allure.Description;
 import io.qameta.allure.Step;
+import io.qameta.allure.junit4.DisplayName;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
 import org.junit.Before;
@@ -72,6 +74,8 @@ public class UserUpdateTest {
 
     @Test
     @Step("Обновление email пользователя с авторизацией")
+    @DisplayName("Обновление email авторизованного пользователя")
+    @Description("Тест проверяет, что авторизованный пользователь может обновить email")
     public void userEditEmailWithAuthorization() {
         String newEmail = "newemail" + System.currentTimeMillis() + "@yandex.ru";
 
@@ -94,6 +98,8 @@ public class UserUpdateTest {
 
     @Test
     @Step("Попытка обновления email без авторизации")
+    @DisplayName("Попытка обновления email без авторизации")
+    @Description("Тест проверяет, что без авторизации обновить email невозможно")
     public void testUserEditWithoutAuthorization() {
         String newEmail = "unauthorized" + System.currentTimeMillis() + "@yandex.ru";
 
