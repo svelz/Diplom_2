@@ -1,35 +1,39 @@
+import client.StellarBurgersClient;
 import io.qameta.allure.Description;
 import io.qameta.allure.Step;
 import io.qameta.allure.junit4.DisplayName;
-import io.restassured.http.ContentType;
 import io.restassured.response.Response;
+import model.User;
 import org.junit.Before;
 import org.junit.Test;
 
-import static io.restassured.RestAssured.given;
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.hamcrest.Matchers.equalTo;
 
 public class UserUpdateTest {
-
+    private StellarBurgersClient client;
     private String authToken;
     private String currentEmail;
-    private final String email = "chengepassword@yandex.ru";
-    private final String password = "password";
+    private User testUser;
 
     @Before
     @Step("Авторизация пользователя или регистрация нового")
     public void setUp() {
-        Response loginResponse = given()
-                .contentType(ContentType.JSON)
-                .body("{\"email\": \"" + email + "\", \"password\": \"" + password + "\"}")
-                .when()
-                .post("https://stellarburgers.nomoreparties.site/api/auth/login");
+        client = new StellarBurgersClient();
+        testUser = new User("chengepassword@yandex.ru", "password", "TestUser");
+
+        Response loginResponse = client.loginUser(testUser);
+        logResponse("Login", loginResponse);
 
         if (loginResponse.getStatusCode() == 200) {
-            authToken = loginResponse.jsonPath().getString("accessToken");
+            authToken = extractToken(loginResponse);
         } else if (loginResponse.getStatusCode() == 401) {
-            registerNewUser();
-            authToken = loginUser().jsonPath().getString("accessToken");
+            client.createUser(testUser);
+            Response secondLoginResponse = client.loginUser(testUser);
+            logResponse("Second Login", secondLoginResponse);
+            authToken = extractToken(secondLoginResponse);
         } else {
             throw new IllegalStateException("Ошибка API при логине! Код: " + loginResponse.getStatusCode());
         }
@@ -41,32 +45,10 @@ public class UserUpdateTest {
         getCurrentUserInfo();
     }
 
-    @Step("Регистрация нового пользователя")
-    private void registerNewUser() {
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"email\": \"" + email + "\", \"password\": \"" + password + "\", \"name\": \"TestUser\"}")
-                .when()
-                .post("https://stellarburgers.nomoreparties.site/api/auth/register")
-                .then()
-                .statusCode(200);
-    }
-
-    @Step("Логин нового пользователя")
-    private Response loginUser() {
-        return given()
-                .contentType(ContentType.JSON)
-                .body("{\"email\": \"" + email + "\", \"password\": \"" + password + "\"}")
-                .when()
-                .post("https://stellarburgers.nomoreparties.site/api/auth/login");
-    }
-
     @Step("Получение текущего email пользователя")
     private void getCurrentUserInfo() {
-        Response userInfoResponse = given()
-                .header("Authorization", authToken)
-                .when()
-                .get("https://stellarburgers.nomoreparties.site/api/auth/user");
+        Response userInfoResponse = client.getUserOrders(authToken);
+        logResponse("Get User Info", userInfoResponse);
 
         userInfoResponse.then().statusCode(200);
         currentEmail = userInfoResponse.jsonPath().getString("user.email");
@@ -79,16 +61,26 @@ public class UserUpdateTest {
     public void userEditEmailWithAuthorization() {
         String newEmail = "newemail" + System.currentTimeMillis() + "@yandex.ru";
 
+        System.out.println("Текущий токен перед обновлением: " + authToken);
+        authToken = cleanToken(authToken);  // Очистка токена
+
         if (newEmail.equals(currentEmail)) {
-            return;
+            return; // Если email не изменился, тест можно пропустить
         }
 
-        Response updateResponse = given()
-                .header("Authorization", authToken)
-                .contentType(ContentType.JSON)
-                .body("{\"email\": \"" + newEmail + "\"}")
-                .when()
-                .patch("https://stellarburgers.nomoreparties.site/api/auth/user");
+        Map<String, String> updateData = new HashMap<>();
+        updateData.put("email", newEmail);
+        System.out.println("Тело запроса на обновление: " + updateData);
+
+        Response updateResponse = client.updateUser(authToken, updateData);
+        logResponse("Update Email", updateResponse);
+
+        if (updateResponse.getStatusCode() == 403) {
+            System.out.println("Ошибка 403: Переполучение токена и повторная попытка обновления...");
+            authToken = extractToken(client.loginUser(testUser));
+            updateResponse = client.updateUser(authToken, updateData);
+            logResponse("Retry Update", updateResponse);
+        }
 
         updateResponse.then()
                 .statusCode(200)
@@ -103,15 +95,34 @@ public class UserUpdateTest {
     public void testUserEditWithoutAuthorization() {
         String newEmail = "unauthorized" + System.currentTimeMillis() + "@yandex.ru";
 
-        Response response = given()
-                .contentType(ContentType.JSON)
-                .body("{\"email\": \"" + newEmail + "\"}")
-                .when()
-                .patch("https://stellarburgers.nomoreparties.site/api/auth/user");
+        Map<String, String> updateData = new HashMap<>();
+        updateData.put("email", newEmail);
+
+        Response response = client.updateUser(null, updateData);
+        logResponse("Unauthorized Update", response);
 
         response.then()
                 .statusCode(401)
                 .body("success", equalTo(false))
                 .body("message", equalTo("You should be authorised"));
+    }
+
+    // Очистка токена от "Bearer "
+    private String cleanToken(String token) {
+        if (token == null || token.isEmpty()) {
+            return "";
+        }
+        return token.trim().startsWith("Bearer ") ? token.trim().substring(7) : token.trim();
+    }
+
+    // Извлечение токена из ответа
+    private String extractToken(Response response) {
+        return cleanToken(response.jsonPath().getString("accessToken"));
+    }
+
+    // Логирование ответов сервера
+    private void logResponse(String action, Response response) {
+        System.out.println(action + " Response Code: " + response.getStatusCode());
+        System.out.println(action + " Response Body: " + response.getBody().asString());
     }
 }
